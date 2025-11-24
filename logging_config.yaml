@@ -1,0 +1,105 @@
+# Logging Configuration for prompt-ops
+# 
+# This file controls the verbosity of different components.
+# To use this file, either:
+#   1. Place it in your working directory as logging_config.yaml
+#   2. Set LOGGING_CONFIG environment variable to point to it
+#
+# Log Levels (from most to least verbose):
+#   DEBUG    - Detailed diagnostic information
+#   INFO     - General informational messages
+#   WARNING  - Warning messages (something might be wrong)
+#   ERROR    - Error messages (something went wrong)
+#   CRITICAL - Critical errors (application failure)
+
+version: 1
+disable_existing_loggers: false
+
+formatters:
+  detailed:
+    format: '%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+  simple:
+    format: '%(levelname)s - %(message)s'
+  minimal:
+    format: '%(message)s'
+
+handlers:
+  console:
+    class: logging.StreamHandler
+    level: INFO
+    formatter: minimal
+    stream: ext://sys.stdout
+
+loggers:
+  # ===========================================
+  # External Libraries - Suppress Noise
+  # ===========================================
+  
+  # LiteLLM (LLM API wrapper)
+  LiteLLM:
+    level: ERROR
+  litellm:
+    level: ERROR
+  
+  # HTTP Libraries
+  httpx:
+    level: WARNING
+  requests:
+    level: WARNING
+  urllib3:
+    level: WARNING
+  aiohttp:
+    level: WARNING
+  
+  # OpenAI SDK
+  openai:
+    level: WARNING
+  
+  # Retry/Backoff
+  backoff:
+    level: ERROR
+  
+  # Async
+  asyncio:
+    level: WARNING
+  
+  # Optimization Libraries
+  optuna:
+    level: ERROR
+  optuna._experimental:
+    level: ERROR
+  
+  # Python Warnings
+  py.warnings:
+    level: ERROR
+  
+  # ===========================================
+  # DSPy Framework - Very Verbose by Default
+  # ===========================================
+  dspy:
+    level: ERROR
+  dspy.teleprompt:
+    level: ERROR
+  dspy.teleprompt.bootstrap:
+    level: ERROR
+  dspy.teleprompt.mipro_optimizer_v2:
+    level: ERROR
+  dspy.predict:
+    level: ERROR
+  dspy.primitives:
+    level: ERROR
+  dspy.evaluate:
+    level: ERROR
+  dspy.evaluate.evaluate:
+    level: ERROR
+  
+  # ===========================================
+  # prompt-ops Application
+  # ===========================================
+  prompt_ops:
+    level: INFO
+
+root:
+  level: INFO
+  handlers: [console]
+

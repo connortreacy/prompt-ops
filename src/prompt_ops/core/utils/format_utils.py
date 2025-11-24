@@ -86,7 +86,23 @@ def convert_json_to_yaml(
 
     # Add config section with task model and optimization info if available
     if task_model:
-        model_name = getattr(task_model, "model_name", str(task_model))
+        # Try to extract model name from different adapter types
+        model_name = None
+        
+        # Try LiteLLMModelAdapter (has model_name attribute)
+        if hasattr(task_model, "model_name"):
+            model_name = task_model.model_name
+        # Try DSPyModelAdapter (stores in kwargs["model"])
+        elif hasattr(task_model, "kwargs") and isinstance(task_model.kwargs, dict):
+            model_name = task_model.kwargs.get("model")
+        # Try TextGradModelAdapter (stores in kwargs["engine_name"])
+        if not model_name and hasattr(task_model, "kwargs") and isinstance(task_model.kwargs, dict):
+            model_name = task_model.kwargs.get("engine_name")
+        
+        # Fallback to string representation only if nothing else works
+        if not model_name:
+            model_name = "unknown_model"
+            
         yaml_content += "\n\nconfig:\n"
         yaml_content += f"  task_model: {model_name}\n"
 

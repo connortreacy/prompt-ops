@@ -31,6 +31,31 @@ from dotenv import load_dotenv
 from prompt_ops.templates import get_template_content, get_template_path
 
 
+def expand_env_vars(value):
+    """Expand environment variables in a string.
+    
+    Supports ${VAR_NAME} syntax for environment variable substitution.
+    
+    Args:
+        value: String that may contain environment variables
+        
+    Returns:
+        String with environment variables expanded
+    """
+    if not isinstance(value, str):
+        return value
+    
+    # Handle ${VAR_NAME} syntax
+    import re
+    pattern = r'\$\{([^}]+)\}'
+    
+    def replace_var(match):
+        var_name = match.group(1)
+        return os.getenv(var_name, match.group(0))  # Return original if not found
+    
+    return re.sub(pattern, replace_var, value)
+
+
 def check_api_key(api_key_env, dotenv_path=".env"):
     """Check if API key is set and return it.
 
@@ -445,7 +470,7 @@ def get_models_from_config(config_dict, override_model_name=None, api_key=None):
     Args:
         config_dict: The full configuration dictionary
         override_model_name: Optional model name to override the one in config
-        api_key: API key to use for the models
+        api_key: API key to use for the models (falls back to config if not provided)
 
     Returns:
         tuple: (task_model, proposer_model, task_model_name, proposer_model_name)
@@ -469,6 +494,23 @@ def get_models_from_config(config_dict, override_model_name=None, api_key=None):
     max_tokens = model_config.get("max_tokens", 2048)
     temperature = model_config.get("temperature", 0.0)
     cache = model_config.get("cache", False)
+    
+    # Check if api_key is in config, expand env vars if present
+    # If not in config, use the api_key parameter from CLI
+    if "api_key" in model_config and model_config["api_key"]:
+        config_api_key = expand_env_vars(model_config["api_key"])
+        if config_api_key and not config_api_key.startswith("${"):
+            # Successfully expanded env var
+            api_key = config_api_key
+            click.echo(f"Using API key from config (expanded from environment variable)")
+        elif api_key:
+            # Env var expansion failed, use CLI api_key
+            click.echo(f"Warning: Could not expand API key from config, using CLI api_key")
+        else:
+            # No CLI api_key provided either
+            click.echo(f"Warning: Could not expand API key environment variable from config", err=True)
+    elif not api_key:
+        click.echo(f"Warning: No API key provided in config or CLI", err=True)
 
     # If override_model_name is provided, use it for both models
     if override_model_name:
@@ -521,13 +563,19 @@ def get_model_from_config(config_dict, override_model_name=None, api_key=None):
     Args:
         config_dict: The full configuration dictionary
         override_model_name: Optional model name to override the one in config
-        api_key: API key to use for the model
+        api_key: API key to use for the model (falls back to config if not provided)
 
     Returns:
         A configured model adapter instance
     """
     model_config = config_dict.get("model", {})
     adapter_type = model_config.get("adapter_type", "dspy")
+    
+    # Check if api_key is in config, expand env vars if present
+    if "api_key" in model_config and model_config["api_key"]:
+        config_api_key = expand_env_vars(model_config["api_key"])
+        if config_api_key and not config_api_key.startswith("${"):
+            api_key = config_api_key
 
     return setup_model(
         model_name=(
@@ -784,31 +832,70 @@ def migrate(config, model, output_dir, save_yaml, api_key_env, dotenv_path, log_
         prompt-ops migrate --config configs/facility.yaml
     """
     # Set up logging
-    numeric_level = getattr(logging, log_level.upper())
-    logging.basicConfig(
-        level=numeric_level,
-        format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
-    )
+    # Suppress Python warnings from libraries
+    import warnings
+    warnings.filterwarnings('ignore', category=Warning)
+    
+    # Check if there's a logging config file
+    logging_config_file = os.getenv("LOGGING_CONFIG", "logging_config.yaml")
+    
+    if os.path.exists(logging_config_file):
+        # Use YAML config if available
+        try:
+            import logging.config
+            with open(logging_config_file, 'r') as f:
+                log_config = yaml.safe_load(f)
+                logging.config.dictConfig(log_config)
+            # Only show this in debug mode
+            if log_level == "DEBUG":
+                click.echo(f"Loaded logging configuration from {logging_config_file}")
+        except Exception as e:
+            click.echo(f"Warning: Could not load logging config: {e}")
+            # Fall back to basic config
+            numeric_level = getattr(logging, log_level.upper())
+            logging.basicConfig(
+                level=numeric_level,
+                format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+            )
+    else:
+        # Use basic config with manual library suppression
+        numeric_level = getattr(logging, log_level.upper())
+        logging.basicConfig(
+            level=numeric_level,
+            format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+        )
 
-    # Suppress verbose external library logging
-    external_loggers = [
-        "LiteLLM",
-        "httpx",
-        "litellm",
-        "openai",
-        "requests",
-        "urllib3",
-        "aiohttp",
-    ]
+        # Suppress verbose external library logging
+        external_loggers = [
+            "LiteLLM",
+            "httpx",
+            "litellm",
+            "openai",
+            "requests",
+            "urllib3",
+            "aiohttp",
+            "backoff",
+            "asyncio",
+            "dspy",
+            "dspy.teleprompt",
+            "dspy.teleprompt.bootstrap",
+            "dspy.teleprompt.mipro_optimizer_v2",
+            "dspy.predict",
+            "dspy.primitives",
+            "dspy.evaluate",
+            "dspy.evaluate.evaluate",
+        ]
 
-    # Allow environment override for debugging external libraries
-    external_log_level = os.getenv("EXTERNAL_LOG_LEVEL", "WARNING").upper()
+        # Allow environment override for debugging external libraries
+        external_log_level = os.getenv("EXTERNAL_LOG_LEVEL", "WARNING").upper()
 
-    for logger_name in external_loggers:
-        logging.getLogger(logger_name).setLevel(getattr(logging, external_log_level))
+        for logger_name in external_loggers:
+            logging.getLogger(logger_name).setLevel(getattr(logging, external_log_level))
 
-    # Get API key using the extracted function
-    api_key = check_api_key(api_key_env, dotenv_path)
+    # Load .env file first if it exists
+    if os.path.exists(dotenv_path):
+        load_dotenv(dotenv_path)
+        click.echo(f"Loaded environment variables from {dotenv_path}")
 
     # Load configuration
     try:
@@ -817,6 +904,17 @@ def migrate(config, model, output_dir, save_yaml, api_key_env, dotenv_path, log_
     except ValueError as e:
         click.echo(f"Error: {str(e)}", err=True)
         sys.exit(1)
+
+    # Check if API key is in config, if not, get it from environment
+    model_config = config_dict.get("model", {})
+    if "api_key" in model_config and model_config["api_key"]:
+        # API key is in config, will be expanded later
+        api_key = None  # Will be read from config
+        click.echo("Using API key from config file")
+    else:
+        # API key not in config, get it from environment
+        api_key = check_api_key(api_key_env, dotenv_path)
+        click.echo(f"Using API key from environment variable {api_key_env}")
 
     # Configure logging from file, if not overridden by CLI
     if not log_level:

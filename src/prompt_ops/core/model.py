@@ -486,6 +486,10 @@ class LiteLLMModelAdapter(ModelAdapter):
         if self.api_base:
             litellm_kwargs["api_base"] = self.api_base
 
+        # Add API key if specified
+        if self.api_key:
+            litellm_kwargs["api_key"] = self.api_key
+
         try:
             response = litellm.completion(**litellm_kwargs)
 
@@ -539,6 +543,10 @@ class LiteLLMModelAdapter(ModelAdapter):
         # Add API base if specified
         if self.api_base:
             litellm_kwargs["api_base"] = self.api_base
+
+        # Add API key if specified
+        if self.api_key:
+            litellm_kwargs["api_key"] = self.api_key
 
         try:
             response = litellm.completion(**litellm_kwargs)

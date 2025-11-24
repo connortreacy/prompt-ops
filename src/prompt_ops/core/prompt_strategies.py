@@ -415,9 +415,16 @@ class BasicOptimizationStrategy(BaseStrategy):
                 f"Optimization strategy using {self.max_labeled_demos} labeled demos, {self.max_bootstrapped_demos} bootstrapped demos with {self.num_threads} threads"
             )
 
-            logging.info(
-                f"Compiling program with {len(self.trainset)} training examples, {len(self.valset)} validation examples, and {len(self.testset)} test examples"
-            )
+            # Calculate expected work for user visibility
+            num_trials = self.num_trials
+            if num_trials is None:
+                # Estimate based on auto mode
+                trial_estimates = {"light": 7, "medium": 12, "heavy": 20}
+                num_trials = trial_estimates.get(dspy_auto_mode, 7)
+            
+            print(f"\n🚀 Starting optimization with {len(self.trainset)} training, {len(self.valset)} validation, {len(self.testset)} test examples")
+            print(f"   Expected: {num_trials} trials × {len(self.valset)} evaluations = {num_trials * len(self.valset)} total evaluations")
+            print(f"   Using {self.num_threads} parallel threads\n")
 
             # Create a custom compile method that injects our tip directly
             original_propose_instructions = None
@@ -591,6 +598,9 @@ class BasicOptimizationStrategy(BaseStrategy):
                 try:
                     # Call compile with all parameters
                     logging.info("Calling optimizer.compile")
+                    import time
+                    start_time = time.time()
+                    
                     optimized_program = optimizer.compile(
                         program,
                         trainset=self.trainset,
@@ -607,6 +617,9 @@ class BasicOptimizationStrategy(BaseStrategy):
                         requires_permission_to_run=self.requires_permission_to_run,
                         provide_traceback=True,  # Add this line
                     )
+                    
+                    elapsed = time.time() - start_time
+                    print(f"\n✅ Optimization completed in {elapsed/60:.1f} minutes ({elapsed:.0f}s)\n")
                     logging.info("Optimizer.compile completed successfully")
                 except TypeError as e:
                     if "'NoneType' object is not subscriptable" in str(e):

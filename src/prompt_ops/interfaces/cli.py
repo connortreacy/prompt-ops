@@ -35,7 +35,11 @@ except ImportError:
     LITELLM_AVAILABLE = False
 
 # Import template utilities
-from prompt_ops.templates import get_template_content, get_template_path
+from prompt_ops.templates import (
+    get_config_template,
+    get_template_content,
+    get_template_path,
+)
 
 
 def check_api_key(api_key_env, dotenv_path=".env"):
@@ -196,27 +200,9 @@ def create(project_name, output_dir, model, api_key_env):
         os.makedirs(os.path.join(project_dir, "prompts"))
         echo_flush(f"✓ Created prompts directory")
 
-        # Step 2: Create config file
+        # Step 2: Create config file from template
         echo_flush(f"\n[2/{total_steps}] Generating configuration file...")
-        config = {
-            "system_prompt": {
-                "file": "prompts/prompt.txt",
-                "inputs": ["question"],
-                "outputs": ["answer"],
-            },
-            "dataset": {
-                "path": "data/dataset.json",
-                "input_field": ["fields", "input"],
-                "golden_output_field": "answer",
-            },
-            "model": {"task_model": model, "proposer_model": model},
-            "metric": {
-                "class": "prompt_ops.core.metrics.FacilityMetric",
-                "strict_json": False,
-                "output_field": "answer",
-            },
-            "optimization": {"strategy": "basic", "num_threads": 2},
-        }
+        config = get_config_template(model)
 
         with open(os.path.join(project_dir, "config.yaml"), "w") as f:
             yaml.dump(config, f, sort_keys=False, default_flow_style=False)
@@ -507,6 +493,29 @@ def get_models_from_config(config_dict, override_model_name=None, api_key=None):
         tuple: (task_model, proposer_model, task_model_name, proposer_model_name)
     """
     model_config = config_dict.get("model", {})
+
+    # Configure rate limit settings if specified
+    # These are set on the litellm module and used by the rate limit handler in model.py
+    if LITELLM_AVAILABLE:
+        rate_limit_config = model_config.get("rate_limit", {})
+        if rate_limit_config:
+            if "max_retries" in rate_limit_config:
+                litellm._rate_limit_max_retries = rate_limit_config["max_retries"]
+                click.echo(
+                    f"Rate limit max_retries set to: {rate_limit_config['max_retries']}"
+                )
+            if "initial_delay" in rate_limit_config:
+                litellm._rate_limit_initial_delay = float(
+                    rate_limit_config["initial_delay"]
+                )
+                click.echo(
+                    f"Rate limit initial_delay set to: {rate_limit_config['initial_delay']}s"
+                )
+            if "max_delay" in rate_limit_config:
+                litellm._rate_limit_max_delay = float(rate_limit_config["max_delay"])
+                click.echo(
+                    f"Rate limit max_delay set to: {rate_limit_config['max_delay']}s"
+                )
 
     # Check optimization strategy to determine appropriate adapter type
     optimization_config = config_dict.get("optimization", {})

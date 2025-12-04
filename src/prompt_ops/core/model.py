@@ -11,6 +11,7 @@ different providers (DSPy, TextGrad, etc.) for use with the prompt-ops tool.
 It leverages LiteLLM's unified interface for accessing various LLM providers.
 """
 
+import logging
 import os
 import time
 from abc import ABC, abstractmethod
@@ -36,6 +37,50 @@ try:
     import litellm
 
     LITELLM_AVAILABLE = True
+
+    # Wrap litellm.completion with rate limit retry logic
+    # This ensures ALL calls (including DSPy's internal calls) get proper retry handling
+    _original_litellm_completion = litellm.completion
+    _rate_limit_logger = logging.getLogger("prompt_ops.rate_limit")
+
+    def _completion_with_rate_limit_handling(*args, **kwargs):
+        """
+        Wrapper around litellm.completion with robust rate limit retry logic.
+
+        Uses longer delays than default to handle per-minute rate limits.
+        """
+        # Configurable via litellm module attributes
+        max_retries = getattr(litellm, "_rate_limit_max_retries", 10)
+        initial_delay = getattr(litellm, "_rate_limit_initial_delay", 30.0)
+        max_delay = getattr(litellm, "_rate_limit_max_delay", 300.0)
+
+        last_exception = None
+        for attempt in range(max_retries + 1):
+            try:
+                return _original_litellm_completion(*args, **kwargs)
+            except litellm.exceptions.RateLimitError as e:
+                last_exception = e
+                if attempt < max_retries:
+                    # Exponential backoff: 30s, 60s, 120s, 240s... capped at max_delay
+                    delay = min(initial_delay * (2**attempt), max_delay)
+                    _rate_limit_logger.warning(
+                        f"Rate limit hit (attempt {attempt + 1}/{max_retries + 1}). Waiting {delay:.0f}s before retry..."
+                    )
+                    time.sleep(delay)
+                else:
+                    _rate_limit_logger.error(
+                        f"Rate limit error: All {max_retries + 1} attempts exhausted."
+                    )
+                    raise
+
+        # Should never reach here, but just in case
+        if last_exception:
+            raise last_exception
+        raise Exception("Unknown error in rate limit retry logic")
+
+    # Replace litellm.completion with our wrapped version
+    litellm.completion = _completion_with_rate_limit_handling
+
 except ImportError:
     LITELLM_AVAILABLE = False
 
